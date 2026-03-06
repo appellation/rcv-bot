@@ -1,0 +1,20 @@
+{
+  "name": "rcv-bot",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "register": "env-cmd -f .dev.vars tsx scripts/register.ts"
+  },
+  "dependencies": {
+    "discord-interactions": "^3.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241205.0",
+    "typescript": "^5.7.2",
+    "wrangler": "^3.99.0",
+    "env-cmd": "^10.1.0",
+    "tsx": "^4.19.2"
+  }
+}

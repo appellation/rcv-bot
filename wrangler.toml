@@ -1,0 +1,11 @@
+name = "rcv-bot"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+[[kv_namespaces]]
+binding = "RCV_KV"
+id = "c04c741a4d7c4948b05e4d745bd2f807"
+preview_id = "d6669b85af424d7dbfc6fd8248802558"
+
+[vars]
+DISCORD_APPLICATION_ID = "1479301847356543077"
