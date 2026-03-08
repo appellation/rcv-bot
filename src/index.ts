@@ -2,7 +2,7 @@ import type { DiscordInteraction, Env } from './types.js';
 import { verifyDiscordRequest } from './verify.js';
 import { handleCreatePoll } from './commands.js';
 import { handlePollAddButton, handlePollModalSubmit, handlePollFinalize } from './create.js';
-import { handleVoteButton, handleRankSelect, handleDoneButton } from './vote.js';
+import { handleVoteButton, handleVoteModalSubmit } from './vote.js';
 import { handleClosePoll } from './close.js';
 import { jsonResponse } from './utils.js';
 
@@ -65,8 +65,7 @@ export default {
       const customId = interaction.data?.custom_id ?? '';
       const parts = customId.split(':');
       const action = parts[0];
-      const id = parts[1];       // pollId or userId depending on action
-      const stepStr = parts[2];
+      const id = parts[1]; // pollId or userId depending on action
 
       if (!id) return new Response('Malformed custom_id', { status: 400 });
 
@@ -76,8 +75,6 @@ export default {
 
       // Voting flow
       if (action === 'vote') return handleVoteButton(interaction, env, id);
-      if (action === 'rank') return handleRankSelect(interaction, env, id, parseInt(stepStr ?? '0', 10));
-      if (action === 'done') return handleDoneButton(interaction, env, id);
       if (action === 'close') return handleClosePoll(interaction, env, id);
 
       // Disabled button stubs — acknowledge silently
@@ -99,6 +96,7 @@ export default {
       const userId = colonIdx === -1 ? '' : customId.slice(colonIdx + 1);
 
       if (action === 'poll_add_modal') return handlePollModalSubmit(interaction, env, userId);
+      if (action === 'vote_modal') return handleVoteModalSubmit(interaction, env, userId);
 
       return new Response('Unknown modal', { status: 400 });
     }

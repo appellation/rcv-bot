@@ -1,4 +1,4 @@
-import type { Poll, Vote, VotingState, CreatingState, Env } from './types.js';
+import type { Poll, Vote, CreatingState, Env } from './types.js';
 
 // ── Poll CRUD ──────────────────────────────────────────────────────────────
 
@@ -33,24 +33,6 @@ export async function getAllVotes(env: Env, pollId: string): Promise<Vote[]> {
     keys.map(k => env.RCV_KV.get<Vote>(k.name, 'json'))
   );
   return votes.filter((v): v is Vote => v !== null);
-}
-
-// ── In-progress voting state ───────────────────────────────────────────────
-
-const VOTING_STATE_TTL = 30 * 60; // 30 minutes
-
-export async function getVotingState(env: Env, pollId: string, userId: string): Promise<VotingState | null> {
-  return env.RCV_KV.get<VotingState>(`voting:${pollId}:${userId}`, 'json');
-}
-
-export async function putVotingState(env: Env, pollId: string, userId: string, state: VotingState): Promise<void> {
-  await env.RCV_KV.put(`voting:${pollId}:${userId}`, JSON.stringify(state), {
-    expirationTtl: VOTING_STATE_TTL,
-  });
-}
-
-export async function deleteVotingState(env: Env, pollId: string, userId: string): Promise<void> {
-  await env.RCV_KV.delete(`voting:${pollId}:${userId}`);
 }
 
 // ── Poll creation state ────────────────────────────────────────────────────

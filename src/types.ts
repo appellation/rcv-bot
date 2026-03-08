@@ -14,12 +14,6 @@ export interface Vote {
   choices: string[];
 }
 
-export interface VotingState {
-  // Option indices selected so far, ordered from most to least preferred
-  choices: string[];
-  step: number;
-}
-
 export interface Env {
   RCV_KV: KVNamespace;
   DISCORD_PUBLIC_KEY: string;
@@ -90,9 +84,11 @@ export interface DiscordComponent {
   placeholder?: string;
   min_values?: number;
   max_values?: number;
-  value?: string; // present on text inputs in modal submissions
+  value?: string;      // text input value in modal submissions
+  values?: string[];   // select menu selected values in modal submissions
   options?: SelectOption[];
-  components?: DiscordComponent[];
+  components?: DiscordComponent[]; // Action Row children
+  component?: DiscordComponent;    // Label child (singular)
 }
 
 export interface CreatingState {

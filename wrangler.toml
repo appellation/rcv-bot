@@ -9,3 +9,8 @@ preview_id = "d6669b85af424d7dbfc6fd8248802558"
 
 [vars]
 DISCORD_APPLICATION_ID = "1479301847356543077"
+
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = true

@@ -1,70 +1,52 @@
-import type { DiscordInteraction, Env, SelectOption, VotingState } from './types.js';
-import { getPoll, getVotingState, putVotingState, putVote, deleteVotingState } from './poll.js';
-import { ephemeralMessage, updateMessage, ordinal } from './utils.js';
-
-// ── Helper: build the voting ephemeral message ─────────────────────────────
-
-function buildVoteMessage(
-  pollId: string,
-  question: string,
-  allOptions: string[],
-  chosenIndices: string[],
-  step: number
-): { content: string; components: unknown[] } {
-  const remainingOptions: SelectOption[] = allOptions
-    .map((label, i) => ({ label, value: String(i) }))
-    .filter(o => !chosenIndices.includes(o.value));
-
-  const progressLines = chosenIndices.map((idx, rank) => {
-    const label = allOptions[parseInt(idx)];
-    return `${ordinal(rank)} choice: **${label}**`;
-  });
-
-  const progress = progressLines.length > 0
-    ? progressLines.join('\n') + '\n\n'
-    : '';
-
-  const content = `**Voting: ${question}**\n\n${progress}Select your **${ordinal(step)} choice**:`;
-
-  const components: unknown[] = [
-    {
-      type: 1, // Action Row
-      components: [
-        {
-          type: 3, // String Select
-          custom_id: `rank:${pollId}:${step}`,
-          placeholder: `Your ${ordinal(step)} choice…`,
-          options: remainingOptions,
-          min_values: 1,
-          max_values: 1,
-        },
-      ],
-    },
-    {
-      type: 1, // Action Row
-      components: [
-        {
-          type: 2, // Button
-          custom_id: `done:${pollId}`,
-          label: chosenIndices.length === 0 ? 'Skip all' : 'Submit vote now',
-          style: chosenIndices.length === 0 ? 2 : 3, // Secondary or Success (green)
-        },
-      ],
-    },
-  ];
-
-  return { content, components };
-}
-
-function formatChoices(choices: string[], options: string[]): string {
-  return choices
-    .map((idx, rank) => `${ordinal(rank)} choice: **${options[parseInt(idx)]}**`)
-    .join(', ');
-}
+import type { DiscordInteraction, Env } from './types.js';
+import { getPoll, putVote } from './poll.js';
+import { ephemeralMessage, jsonResponse, ordinal } from './utils.js';
 
 // ── Handlers ───────────────────────────────────────────────────────────────
 
 export async function handleVoteButton(
+  _interaction: DiscordInteraction,
+  env: Env,
+  pollId: string
+): Promise<Response> {
+  const poll = await getPoll(env, pollId);
+  if (!poll) return ephemeralMessage('Poll not found.');
+  if (poll.status === 'closed') return ephemeralMessage('This poll is already closed.');
+
+  const numSlots = Math.min(poll.options.length, 5);
+  const selectOptions = poll.options.map((label, i) => ({ label, value: String(i) }));
+
+  const components = Array.from({ length: numSlots }, (_, i) => ({
+    type: 18, // Label
+    label: `${ordinal(i)} choice${i === 0 ? '' : ' (optional)'}`,
+    component: {
+      type: 3, // String Select
+      custom_id: `choice:${i}`,
+      placeholder: 'Select an option…',
+      options: selectOptions,
+      min_values: i === 0 ? 1 : 0,
+      max_values: 1,
+      required: i === 0,
+    },
+  }));
+
+  const title = poll.question.length <= 45
+    ? poll.question
+    : poll.question.slice(0, 44) + '…';
+
+  const payload = {
+    type: 9, // MODAL
+    data: {
+      custom_id: `vote_modal:${pollId}`,
+      title,
+      components,
+    },
+  };
+
+  return jsonResponse(payload);
+}
+
+export async function handleVoteModalSubmit(
   interaction: DiscordInteraction,
   env: Env,
   pollId: string
@@ -75,102 +57,44 @@ export async function handleVoteButton(
 
   const userId = interaction.member?.user.id ?? interaction.user?.id ?? '';
 
-  // Reset any in-progress vote state and start fresh (allows re-voting)
-  const initialState: VotingState = { choices: [], step: 0 };
-  await putVotingState(env, pollId, userId, initialState);
+  // Label components use singular `component`, Action Rows use `components` array
+  const inputs = (interaction.data?.components ?? [])
+    .map(row => row.component ?? row.components?.[0])
+    .filter((c): c is NonNullable<typeof c> => c != null);
 
-  const { content, components } = buildVoteMessage(pollId, poll.question, poll.options, [], 0);
+  const numSlots = Math.min(poll.options.length, 5);
+  const chosenIndices: string[] = [];
+  const seenIndices = new Set<string>();
 
-  return new Response(
-    JSON.stringify({
-      type: 4, // CHANNEL_MESSAGE_WITH_SOURCE
-      data: { content, components, flags: 64 }, // 64 = EPHEMERAL
-    }),
-    { headers: { 'Content-Type': 'application/json' } }
-  );
-}
+  for (let i = 0; i < numSlots; i++) {
+    const selected = inputs.find(c => c.custom_id === `choice:${i}`)?.values?.[0];
+    if (selected === undefined) continue; // optional slot left blank
 
-export async function handleRankSelect(
-  interaction: DiscordInteraction,
-  env: Env,
-  pollId: string,
-  step: number
-): Promise<Response> {
-  const poll = await getPoll(env, pollId);
-  if (!poll) return ephemeralMessage('Poll not found.');
-  if (poll.status === 'closed') return ephemeralMessage('This poll is already closed.');
-
-  const userId = interaction.member?.user.id ?? interaction.user?.id ?? '';
-  const selectedValue = interaction.data?.values?.[0];
-  if (selectedValue === undefined) return ephemeralMessage('No selection received.');
-
-  const state = await getVotingState(env, pollId, userId) ?? { choices: [], step: 0 };
-
-  // Guard against replayed or out-of-sync interactions
-  if (state.step !== step) {
-    return updateMessage({
-      content: 'Your voting session expired or became out of sync. Please click **🗳️ Vote** again.',
-      components: [],
-    });
+    if (seenIndices.has(selected)) {
+      return ephemeralMessage(
+        `You selected **${poll.options[parseInt(selected)]}** for multiple ranks. Each option can only appear once.`
+      );
+    }
+    seenIndices.add(selected);
+    chosenIndices.push(selected); // already 0-based index strings
   }
 
-  state.choices.push(selectedValue);
-  state.step++;
+  if (chosenIndices.length === 0) {
+    return ephemeralMessage('Please select at least one choice.');
+  }
 
-  // When only one option remains unranked, auto-append it as last and submit
-  if (state.step >= poll.options.length - 1) {
+  // Auto-append the single remaining option if only one is left unranked
+  if (chosenIndices.length === poll.options.length - 1) {
     const allIndices = poll.options.map((_, i) => String(i));
-    const remaining = allIndices.find(i => !state.choices.includes(i));
-    if (remaining !== undefined) state.choices.push(remaining);
-
-    await putVote(env, pollId, userId, { choices: state.choices });
-    await deleteVotingState(env, pollId, userId);
-
-    const summary = formatChoices(state.choices, poll.options);
-    return updateMessage({
-      content: `✅ **Vote submitted!**\n${summary}`,
-      components: [],
-    });
+    const remaining = allIndices.find(i => !chosenIndices.includes(i));
+    if (remaining !== undefined) chosenIndices.push(remaining);
   }
 
-  // Save progress and show the next select menu
-  await putVotingState(env, pollId, userId, state);
+  await putVote(env, pollId, userId, { choices: chosenIndices });
 
-  const { content, components } = buildVoteMessage(
-    pollId,
-    poll.question,
-    poll.options,
-    state.choices,
-    state.step
-  );
+  const summary = chosenIndices
+    .map((idx, rank) => `${ordinal(rank)} choice: **${poll.options[parseInt(idx)]}**`)
+    .join('\n');
 
-  return updateMessage({ content, components });
-}
-
-export async function handleDoneButton(
-  interaction: DiscordInteraction,
-  env: Env,
-  pollId: string
-): Promise<Response> {
-  const poll = await getPoll(env, pollId);
-  if (!poll) return ephemeralMessage('Poll not found.');
-
-  const userId = interaction.member?.user.id ?? interaction.user?.id ?? '';
-  const state = await getVotingState(env, pollId, userId);
-
-  if (!state || state.choices.length === 0) {
-    return updateMessage({
-      content: 'Please select at least one choice before submitting.',
-      components: [],
-    });
-  }
-
-  await putVote(env, pollId, userId, { choices: state.choices });
-  await deleteVotingState(env, pollId, userId);
-
-  const summary = formatChoices(state.choices, poll.options);
-  return updateMessage({
-    content: `✅ **Vote submitted!** (partial ranking — unranked options are not counted)\n${summary}`,
-    components: [],
-  });
+  return ephemeralMessage(`✅ **Vote submitted!**\n${summary}`);
 }
